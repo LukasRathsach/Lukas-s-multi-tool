@@ -2,7 +2,7 @@
 > Shared AI context: read `~/.claude/AI_CONFIG_INDEX.md` first, then this project file. Universal rules and skills live in `~/.claude/`; project-specific context stays here.
 <!-- AI-CONFIG:END -->
 
-# Video Tools — CLAUDE.md
+# Video Tools — AGENTS.md
 
 Dette er en Flask-baseret webapplikation der kører lokalt på Mac og tilbyder to værktøjer:
 1. **Instagram Reel & YouTube Shorts downloader** — downloader videoer via yt-dlp
@@ -20,9 +20,9 @@ insta reel bot/
 ├── Procfile             # Gunicorn-kommando til Railway
 ├── nixpacks.toml        # Alternativ Railway-konfiguration (bruges ikke, Dockerfile har forrang)
 ├── .gitignore
-├── CLAUDE.md            # Denne fil
-└── .claude/
-    └── launch.json      # Fortæller Claude Code hvordan serveren startes
+├── AGENTS.md            # Denne fil
+└── .Codex/
+    └── launch.json      # Fortæller Codex hvordan serveren startes
 ```
 
 ---
@@ -40,7 +40,7 @@ pip3 install flask flask-cors yt-dlp gunicorn
 python3 app.py
 ```
 
-Eller via Claude Code — Claude starter automatisk med `.claude/launch.json` på port **5555**.
+Eller via Codex — Codex starter automatisk med `.Codex/launch.json` på port **5555**.
 
 Åbn `http://localhost:5555` i browseren.
 
@@ -203,7 +203,7 @@ Koden stripper automatisk eventuelle `<` og `>` der kan snige sig ind fra shell-
 
 | | Lokalt | Railway |
 |---|---|---|
-| Start | `python3 app.py` eller Claude Code | Automatisk |
+| Start | `python3 app.py` eller Codex | Automatisk |
 | URL | `http://localhost:5555` | Fast Railway-URL |
 | Tilgængeligt for andre | Nej (brug cloudflared) | Ja |
 | ffmpeg | Skal installeres via brew | Installeres via Dockerfile |

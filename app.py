@@ -295,8 +295,9 @@ CONVERTER_HTML = """<!DOCTYPE html>
     }
     .convert-all-btn:hover, .dl-all-btn:hover, .dl-zip-btn:hover { opacity: 0.85; }
     .convert-all-btn:disabled, .dl-all-btn:disabled, .dl-zip-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .folder-summary { padding: 12px 16px; background: #161616; border: 1px solid #222; border-radius: 10px; margin-bottom: 16px; font-size: 13px; color: #888; }
-    .folder-summary strong { color: #fff; }
+    .folder-card { background: #161616; border: 1px solid #222; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+    .folder-card-header { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: #888; }
+    .folder-card-header strong { color: #fff; }
   </style>
 </head>
 <body>
@@ -332,25 +333,17 @@ CONVERTER_HTML = """<!DOCTYPE html>
 
     <!-- FOLDER MODE -->
     <div id="mode-folder" style="display:none">
-      <div class="drop-zone" onclick="document.getElementById('folder-input').click()">
+      <div class="drop-zone" id="folder-drop-zone">
         <span>📁</span>
-        <p>Click to select a folder</p>
-        <input type="file" id="folder-input" webkitdirectory multiple accept="video/*" onchange="addFolder(this.files)" />
+        <p>Click to add a folder</p>
+        <input type="file" id="folder-input" webkitdirectory multiple style="display:none" />
       </div>
-      <div id="folder-summary" class="folder-summary" style="display:none"></div>
-      <div class="file-list" id="folder-file-list"></div>
-      <div class="btn-row" id="folder-btn-row">
-        <div class="top-btns">
-          <button class="convert-all-btn" id="folder-convert-btn" onclick="convertFolder()">Convert &amp; Download ZIP</button>
-        </div>
-        <button class="dl-zip-btn" id="dl-zip-btn">⬇ Download ZIP</button>
-      </div>
+      <div id="folders-container"></div>
     </div>
   </div>
 
   <script>
     let files = [];
-    let folderFiles = [];
     let mode = 'files';
 
     function switchMode(m) {
@@ -390,7 +383,7 @@ CONVERTER_HTML = """<!DOCTYPE html>
           <span>🎬</span>
           <span class="file-name">${item.file.name}</span>
           <span class="file-status ${item.status}">${labels[item.status]}</span>
-          ${item.dlUrl ? `<a class="file-dl" href="${item.dlUrl}" download="${item.file.name.replace(/\.[^.]+$/, '')}_h264.mp4">⬇</a>` : ''}
+          ${item.dlUrl ? `<a class="file-dl" href="${item.dlUrl}" download="${item.file.name.replace(/\.[^.]+$/, '.mp4')}">⬇</a>` : ''}
         `;
         list.appendChild(div);
       });
@@ -422,84 +415,112 @@ CONVERTER_HTML = """<!DOCTYPE html>
       for (const item of files.filter(f => f.status === 'done' && f.dlUrl)) {
         const a = document.createElement('a');
         a.href = item.dlUrl;
-        a.download = item.file.name.replace(/\.[^.]+$/, '') + '_h264.mp4';
+        a.download = item.file.name.replace(/\.[^.]+$/, '.mp4');
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         await new Promise(r => setTimeout(r, 500));
       }
     }
 
     // ── FOLDER MODE ─────────────────────────────────────────────
+    let folders = [];
+    const folderDropZone = document.getElementById('folder-drop-zone');
+    folderDropZone.addEventListener('click', () => document.getElementById('folder-input').click());
+    folderDropZone.addEventListener('dragover', e => { e.preventDefault(); folderDropZone.classList.add('drag-over'); });
+    folderDropZone.addEventListener('dragleave', () => folderDropZone.classList.remove('drag-over'));
+    folderDropZone.addEventListener('drop', e => { e.preventDefault(); folderDropZone.classList.remove('drag-over'); addFolder(e.dataTransfer.files); });
+    document.getElementById('folder-input').addEventListener('change', function() { addFolder(this.files); });
+
     function addFolder(newFiles) {
-      folderFiles = Array.from(newFiles).filter(f => f.type.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|m4v)$/i.test(f.name));
-      const summary = document.getElementById('folder-summary');
-      const folderName = folderFiles[0]?.webkitRelativePath.split('/')[0] || 'folder';
-      summary.style.display = 'block';
-      summary.innerHTML = `📁 <strong>${folderName}</strong> — ${folderFiles.length} video file${folderFiles.length !== 1 ? 's' : ''} found`;
-      renderFolderList();
-      document.getElementById('folder-btn-row').style.display = folderFiles.length ? 'flex' : 'none';
+      const videoFiles = Array.from(newFiles).filter(f => f.type.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|m4v)$/i.test(f.name));
+      resetFolderInput();
+      if (!videoFiles.length) return;
+      const folderName = videoFiles[0]?.webkitRelativePath.split('/')[0] || 'Folder';
+      folders.push({ id: Date.now(), name: folderName, files: videoFiles.map(f => ({ file: f, _status: 'waiting' })), converting: false, zipUrl: null });
+      renderFolders();
     }
 
-    function renderFolderList() {
-      const list = document.getElementById('folder-file-list');
-      list.innerHTML = '';
+    function resetFolderInput() {
+      const old = document.getElementById('folder-input');
+      const neu = document.createElement('input');
+      neu.type = 'file'; neu.id = 'folder-input'; neu.style.display = 'none';
+      neu.setAttribute('webkitdirectory', ''); neu.setAttribute('multiple', '');
+      neu.addEventListener('change', function() { addFolder(this.files); });
+      old.parentNode.replaceChild(neu, old);
+    }
+
+    function renderFolders() {
+      const container = document.getElementById('folders-container');
+      container.innerHTML = '';
       const labels = { waiting: 'Waiting', converting: '⏳ Converting…', done: '✓ Done', error: '✗ Error' };
-      folderFiles.forEach(item => {
-        const div = document.createElement('div');
-        div.className = 'file-item';
-        const relPath = item.webkitRelativePath || item.name;
-        const parts = relPath.split('/');
-        const name = parts.pop();
-        const dir = parts.join('/');
-        div.innerHTML = `
-          <span>🎬</span>
-          <div class="file-info">
-            <div class="file-name">${name}</div>
-            ${dir ? `<div class="file-path">${dir}</div>` : ''}
+      folders.forEach(folder => {
+        const card = document.createElement('div');
+        card.className = 'folder-card';
+        const fileRows = folder.files.map(item => {
+          const relPath = item.file.webkitRelativePath || item.file.name;
+          const parts = relPath.split('/');
+          const name = parts.pop();
+          const dir = parts.slice(1).join('/');
+          return `<div class="file-item">
+            <span>🎬</span>
+            <div class="file-info">
+              <div class="file-name">${name}</div>
+              ${dir ? `<div class="file-path">${dir}</div>` : ''}
+            </div>
+            <span class="file-status ${item._status || 'waiting'}">${labels[item._status || 'waiting']}</span>
+          </div>`;
+        }).join('');
+        const actionBtn = folder.zipUrl
+          ? `<button class="convert-all-btn" style="padding:8px 16px;font-size:13px;flex:none;background:#1a1a1a;border:1px solid #2a2a2a" onclick="window.location='${folder.zipUrl}'">⬇ ZIP</button>`
+          : `<button class="convert-all-btn" style="padding:8px 16px;font-size:13px;flex:none" ${folder.converting ? 'disabled' : ''} onclick="convertFolder(${folder.id})">${folder.converting ? 'Converting…' : 'Convert'}</button>`;
+        card.innerHTML = `
+          <div class="folder-card-header">
+            <span>📁 <strong>${folder.name}</strong> — ${folder.files.length} file${folder.files.length !== 1 ? 's' : ''}</span>
+            ${actionBtn}
           </div>
-          <span class="file-status ${item._status || 'waiting'}">${labels[item._status || 'waiting']}</span>
+          <div class="file-list" style="margin:12px 0 0;max-height:200px">${fileRows}</div>
         `;
-        list.appendChild(div);
+        container.appendChild(card);
       });
     }
 
-    async function convertFolder() {
-      const btn = document.getElementById('folder-convert-btn');
-      const zipBtn = document.getElementById('dl-zip-btn');
-      btn.disabled = true; btn.textContent = 'Converting…'; zipBtn.style.display = 'none';
+    async function convertFolder(folderId) {
+      const folder = folders.find(f => f.id === folderId);
+      if (!folder || folder.converting) return;
+      folder.converting = true;
+      renderFolders();
 
-      // Convert one by one, updating status
+      const CONCURRENCY = 3;
       const results = [];
-      for (let i = 0; i < folderFiles.length; i++) {
-        folderFiles[i]._status = 'converting'; renderFolderList();
+
+      async function processFile(i) {
+        folder.files[i]._status = 'converting'; renderFolders();
         try {
           const fd = new FormData();
-          fd.append('file', folderFiles[i]);
-          fd.append('path', folderFiles[i].webkitRelativePath || folderFiles[i].name);
+          fd.append('file', folder.files[i].file);
+          fd.append('path', folder.files[i].file.webkitRelativePath || folder.files[i].file.name);
           const res = await fetch('/convert', { method: 'POST', body: fd });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Failed');
-          folderFiles[i]._status = 'done';
-          results.push({ serverUrl: data.url, relativePath: folderFiles[i].webkitRelativePath || folderFiles[i].name });
-        } catch { folderFiles[i]._status = 'error'; }
-        renderFolderList();
+          folder.files[i]._status = 'done';
+          results.push({ serverUrl: data.url, relativePath: folder.files[i].file.webkitRelativePath || folder.files[i].file.name });
+        } catch { folder.files[i]._status = 'error'; }
+        renderFolders();
       }
 
-      // Ask server to zip them
+      for (let i = 0; i < folder.files.length; i += CONCURRENCY) {
+        await Promise.all(folder.files.slice(i, i + CONCURRENCY).map((_, j) => processFile(i + j)));
+      }
+
       if (results.length > 0) {
-        const res = await fetch('/zip', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ files: results })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          zipBtn.style.display = 'block';
-          zipBtn.onclick = () => { window.location = data.url; };
-          zipBtn.textContent = '⬇ Download ZIP';
-        }
+        try {
+          const res = await fetch('/zip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files: results }) });
+          const data = await res.json();
+          if (res.ok) folder.zipUrl = data.url;
+        } catch {}
       }
 
-      btn.disabled = false; btn.textContent = 'Convert & Download ZIP';
+      folder.converting = false;
+      renderFolders();
     }
   </script>
 </body>
@@ -596,17 +617,30 @@ def convert():
     ffmpeg_check = subprocess.run(["which", "ffmpeg"], capture_output=True, text=True)
     ffmpeg_bin = ffmpeg_check.stdout.strip() or "ffmpeg"
 
+    # Try hardware-accelerated encoding first (macOS VideoToolbox), fall back to software
     result = subprocess.run([
         ffmpeg_bin, "-y",
         "-i", input_path,
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
+        "-c:v", "h264_videotoolbox",
+        "-q:v", "65",
         "-c:a", "aac",
         "-b:a", "128k",
         "-movflags", "+faststart",
         output_path
     ], capture_output=True, text=True, timeout=600)
+
+    if result.returncode != 0:
+        result = subprocess.run([
+            ffmpeg_bin, "-y",
+            "-i", input_path,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
+            output_path
+        ], capture_output=True, text=True, timeout=600)
 
     os.remove(input_path)
 
@@ -638,7 +672,7 @@ def make_zip():
             if not os.path.exists(file_path):
                 continue
             # Preserve directory structure, replace original extension with _h264.mp4
-            zip_entry = re.sub(r'\.[^.]+$', '_h264.mp4', relative_path)
+            zip_entry = re.sub(r'\.[^.]+$', '.mp4', relative_path)
             zf.write(file_path, zip_entry)
 
     zip_filename = os.path.basename(zip_path)
@@ -678,4 +712,4 @@ def serve_converted(filename):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5555))
     print(f"Starting Video Tools at http://localhost:{port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
